@@ -241,9 +241,7 @@ function fetchInfo(url) {
 function downloadJob(job) {
   return new Promise((resolve, reject) => {
     const format =
-      const format =
-  'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best';
-(Yani bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b[height<=1080]/b → bestvideo[height<=1080]+bestaudio/best[height<=1080]/best)
+      'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best';
     const args = [
       '-m',
       'yt_dlp',
