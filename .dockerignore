@@ -1,0 +1,8 @@
+node_modules
+data
+test-*.mp4
+test-*.js
+test-*.ps1
+*.log
+.git
+.gitignore

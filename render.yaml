@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: shorts-studio
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON
+        value: python3
+      - key: FFMPEG
+        value: ffmpeg
+      - key: X264_PRESET
+        value: ultrafast
+      - key: JOB_TTL_HOURS
+        value: "2"
+      - key: APP_PASSWORD
+        sync: false

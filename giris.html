@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Giriş — ShortsStudio</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="glow glow-a" aria-hidden="true"></div>
+  <div class="glow glow-b" aria-hidden="true"></div>
+
+  <main class="login-wrap">
+    <section class="card login-card">
+      <a class="brand" href="/giris">
+        <span class="brand-mark">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+        </span>
+        <span class="brand-name">Shorts<span>Studio</span></span>
+      </a>
+
+      <h1>Tekrar hoş geldin</h1>
+      <p class="muted">Devam etmek için şifreni gir.</p>
+
+      <form id="login-form" autocomplete="off">
+        <input id="password" type="password" placeholder="Şifre" required autofocus />
+        <button class="btn btn-primary full" type="submit">Giriş yap</button>
+      </form>
+
+      <div id="login-error" class="form-error" hidden></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const input = document.getElementById('password');
+    const err = document.getElementById('login-error');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.hidden = true;
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: input.value }),
+        });
+        if (res.ok) {
+          window.location.href = '/';
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        err.textContent = data.error || 'Giriş başarısız.';
+        err.hidden = false;
+      } catch {
+        err.textContent = 'Sunucuya ulaşılamadı.';
+        err.hidden = false;
+      }
+      input.select();
+    });
+  </script>
+</body>
+</html>
