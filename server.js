@@ -10,10 +10,34 @@ const execFileAsync = promisify(execFile);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const YTDLP_BIN = process.env.YTDLP_PATH || "yt-dlp";
+const PUBLIC_DIR = path.join(__dirname, "public");
+const SERVER_VERSION = "routing-fix-v2"; // deploy'un güncel olduğunu doğrulamak için
+
+// ---------------------------------------------------------------------------
+// index.html konumu: önce public/index.html, yoksa kök dizindeki index.html
+// ---------------------------------------------------------------------------
+function findIndexHtml() {
+  const candidates = [
+    path.join(PUBLIC_DIR, "index.html"),
+    path.join(__dirname, "index.html"),
+  ];
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+const INDEX_HTML_PATH = findIndexHtml();
+console.log(
+  INDEX_HTML_PATH
+    ? `index.html bulundu: ${INDEX_HTML_PATH}`
+    : "UYARI: index.html bulunamadı (public/index.html bekleniyordu)."
+);
+
+// ---------------------------------------------------------------------------
+// Statik dosyalar (CSS, JS, görseller). "/" isteğini aşağıdaki rota yönetir.
+// ---------------------------------------------------------------------------
+app.use(express.static(PUBLIC_DIR, { index: false }));
 
 // ---------------------------------------------------------------------------
 // Çerez dosyası: repodaki cookies.txt -> geçici klasöre kopyalanır
-// (yt-dlp çerez dosyasına geri yazabildiği için yazılabilir bir kopya kullanılır)
 // ---------------------------------------------------------------------------
 const REPO_COOKIES_PATH = path.join(__dirname, "cookies.txt");
 let cookiesTmpDir = null;
@@ -26,11 +50,8 @@ function prepareCookies() {
   }
 
   let content = fs.readFileSync(REPO_COOKIES_PATH, "utf8");
-
-  // Git/Windows kaynaklı CRLF satır sonlarını düzelt
   content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() + "\n";
 
-  // yt-dlp bu başlığı bekler
   if (!/^# (Netscape )?HTTP Cookie File/.test(content)) {
     content = "# Netscape HTTP Cookie File\n" + content;
   }
@@ -94,13 +115,34 @@ async function runYtdlp(extraArgs) {
 }
 
 // ---------------------------------------------------------------------------
-// Rotalar
+// Sayfa rotaları
 // ---------------------------------------------------------------------------
+
+// Ana sayfa: HTML arayüzü (JSON DEĞİL)
 app.get("/", (req, res) => {
-  res.json({ ok: true, cookies: Boolean(cookiesPath) });
+  if (!INDEX_HTML_PATH) {
+    return res
+      .status(404)
+      .send("index.html bulunamadı. Dosyanın public/index.html yolunda olduğundan emin ol.");
+  }
+  res.sendFile(INDEX_HTML_PATH);
 });
 
-// Video bilgisi: GET /api/info?url=https://www.youtube.com/watch?v=...
+// ---------------------------------------------------------------------------
+// API rotaları
+// ---------------------------------------------------------------------------
+
+// Durum testi: GET /api/status
+app.get("/api/status", (req, res) => {
+  res.json({
+    ok: true,
+    cookies: Boolean(cookiesPath),
+    indexHtml: Boolean(INDEX_HTML_PATH),
+    version: SERVER_VERSION,
+  });
+});
+
+// Video bilgisi: GET /api/info?url=...
 app.get("/api/info", async (req, res) => {
   const url = req.query.url;
   if (!url || !isValidYoutubeUrl(url)) {
@@ -108,7 +150,6 @@ app.get("/api/info", async (req, res) => {
   }
 
   try {
-    // "--" URL'nin yanlışlıkla bir argüman olarak yorumlanmasını engeller
     const out = await runYtdlp(["-J", "--", url]);
     const info = JSON.parse(out);
     res.json({
@@ -134,12 +175,7 @@ app.get("/api/download", (req, res) => {
     return res.status(400).json({ error: "Geçerli bir YouTube URL'si gerekli." });
   }
 
-  const args = [
-    ...baseArgs(),
-    "-f", "best[ext=mp4]/best",
-    "-o", "-",
-    "--", url,
-  ];
+  const args = [...baseArgs(), "-f", "best[ext=mp4]/best", "-o", "-", "--", url];
 
   const child = spawn(YTDLP_BIN, args);
   let stderrBuf = "";
@@ -172,6 +208,11 @@ app.get("/api/download", (req, res) => {
   req.on("close", () => child.kill("SIGKILL"));
 });
 
+// Tanımsız /api/* istekleri için JSON 404
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "Bulunamadı." });
+});
+
 app.listen(PORT, () => {
-  console.log(`Sunucu ${PORT} portunda çalışıyor.`);
+  console.log(`Sunucu ${PORT} portunda çalışıyor (${SERVER_VERSION}).`);
 });
