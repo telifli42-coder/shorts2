@@ -35,24 +35,6 @@ if (process.env.YTDLP_COOKIES && process.env.YTDLP_COOKIES.trim()) {
   }
 }
 
-fs.mkdirSync(JOBS_DIR, { recursive: true });
-
-const PYTHON = process.env.PYTHON || 'python';
-
-let FFMPEG = process.env.FFMPEG || '';
-if (!FFMPEG) {
-  try {
-    FFMPEG = execFileSync(
-      PYTHON,
-      ['-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'],
-      { encoding: 'utf8', windowsHide: true }
-    ).trim();
-  } catch (err) {
-    console.warn('[warn] ffmpeg yolu bulunamadi, "ffmpeg" varsayilani kullanilacak:', err.message);
-    FFMPEG = 'ffmpeg';
-  }
-}
-
 const jobs = new Map();
 
 const app = express();
@@ -98,10 +80,6 @@ app.use((req, res, next) => {
 
 app.use(express.static(PUBLIC_DIR));
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
-
 function isYouTubeUrl(value) {
   if (typeof value !== 'string') return false;
   try {
@@ -130,10 +108,11 @@ function friendlyError(message) {
   if (/sign in to confirm|confirm you.re not a bot|not a bot|bot check/i.test(text)) {
     return 'YouTube bu sunucudan gelen isteği engelledi. Bir YouTube hesabından cookies.txt alıp YTDLP_COOKIES değişkenine eklemelisin.';
   }
+  if (/Requested format is not available/i.test(text)) {
+    return 'Bu video için uygun format bulunamadı. Başka bir video dene veya daha sonra tekrar dene.';
+  }
   return text || 'Beklenmeyen bir hata oluştu.';
 }
-
-/* --------------------------- oturum / şifre --------------------------- */
 
 function sessionSecret() {
   return crypto.createHash('sha256').update(`shorts-studio::${APP_PASSWORD || 'local-only'}`).digest();
@@ -190,7 +169,7 @@ function makeJob(url) {
     dir,
     status: 'queued',
     progress: 0,
-    message: 'Sira bekleniyor…',
+    message: 'Sıra bekleniyor…',
     error: null,
     info: null,
     sourceFile: null,
@@ -227,12 +206,12 @@ function fetchInfo(url) {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) {
-        return reject(new Error(cleanError(err) || 'Video bilgisi alinamadi.'));
+        return reject(new Error(cleanError(err) || 'Video bilgisi alınamadı.'));
       }
       try {
         resolve(JSON.parse(out));
       } catch {
-        reject(new Error('Video bilgisi okunamadi.'));
+        reject(new Error('Video bilgisi okunamadı.'));
       }
     });
   });
@@ -240,8 +219,6 @@ function fetchInfo(url) {
 
 function downloadJob(job) {
   return new Promise((resolve, reject) => {
-    const format =
-      'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best';
     const args = [
       '-m',
       'yt_dlp',
@@ -255,7 +232,7 @@ function downloadJob(job) {
       '--ffmpeg-location',
       FFMPEG,
       '-f',
-      format,
+      'bestvideo*[height<=1080]+bestaudio/best[height<=1080]/best',
       '--merge-output-format',
       'mp4',
       '-o',
@@ -283,14 +260,14 @@ function downloadJob(job) {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) {
-        return reject(new Error(cleanError(err) || 'Video indirilemedi.'));
+        return reject(new Error(friendlyError(cleanError(err) || 'Video indirilemedi.')));
       }
       const file = fs.readdirSync(job.dir).find((f) => f.startsWith('video.'));
-      if (!file) return reject(new Error('Video dosyasi bulunamadi.'));
+      if (!file) return reject(new Error('Video dosyası bulunamadı.'));
       job.sourceFile = path.join(job.dir, file);
       job.progress = 100;
       job.status = 'ready';
-      job.message = 'Hazir';
+      job.message = 'Hazır';
       resolve(job);
     });
   });
@@ -348,7 +325,7 @@ function renderClip(job, { start, end, mode }) {
 
     job.status = 'rendering';
     job.progress = 0;
-    job.message = 'Klip olusturuluyor…';
+    job.message = 'Klip oluşturuluyor…';
     job.error = null;
 
     const child = spawn(FFMPEG, args, { cwd: job.dir, windowsHide: true });
@@ -366,20 +343,16 @@ function renderClip(job, { start, end, mode }) {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0 || !fs.existsSync(outFile)) {
-        return reject(new Error(cleanError(err) || 'Klip olusturulamadi.'));
+        return reject(new Error(friendlyError(cleanError(err) || 'Klip oluşturulamadı.')));
       }
       job.clipFile = outFile;
       job.progress = 100;
       job.status = 'done';
-      job.message = 'Hazir';
+      job.message = 'Hazır';
       resolve(job);
     });
   });
 }
-
-/* ------------------------------------------------------------------ */
-/* API                                                                 */
-/* ------------------------------------------------------------------ */
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
@@ -406,7 +379,7 @@ app.post('/api/logout', (req, res) => {
 app.post('/api/jobs', (req, res) => {
   const url = (req.body && req.body.url) || '';
   if (!isYouTubeUrl(url)) {
-    return res.status(400).json({ error: 'Gecerli bir YouTube linki gir.' });
+    return res.status(400).json({ error: 'Geçerli bir YouTube linki gir.' });
   }
 
   const job = makeJob(url);
@@ -415,12 +388,12 @@ app.post('/api/jobs', (req, res) => {
   (async () => {
     try {
       job.status = 'preparing';
-      job.message = 'Video bilgileri aliniyor…';
+      job.message = 'Video bilgisi alınıyor…';
       const info = await fetchInfo(url);
       if (!info || !info.duration || !Number.isFinite(info.duration)) {
-        const err = new Error('Bu video indirilemiyor (canli yayin veya kisitli icerik olabilir).');
+        const err = new Error('Bu video indirilemiyor (canlı yayın veya kısıtlı içerik olabilir).');
         job.status = 'error';
-        job.error = err.message;
+        job.error = friendlyError(err.message);
         return;
       }
       job.info = {
@@ -441,21 +414,21 @@ app.post('/api/jobs', (req, res) => {
 
 app.get('/api/jobs/:id', (req, res) => {
   const job = jobs.get(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Is bulunamadi.' });
+  if (!job) return res.status(404).json({ error: 'İş bulunamadı.' });
   res.json(view(job));
 });
 
 app.post('/api/jobs/:id/render', (req, res) => {
   const job = jobs.get(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Is bulunamadi.' });
+  if (!job) return res.status(404).json({ error: 'İş bulunamadı.' });
   if (job.status === 'rendering') {
-    return res.status(409).json({ error: 'Klip zaten olusturuluyor.' });
+    return res.status(409).json({ error: 'Klip zaten oluşturuluyor.' });
   }
   if (job.status !== 'ready' && job.status !== 'done' && job.status !== 'error') {
-    return res.status(409).json({ error: 'Video henuz hazir degil.' });
+    return res.status(409).json({ error: 'Video henüz hazır değil.' });
   }
   if (!job.sourceFile) {
-    return res.status(409).json({ error: 'Kaynak video bulunamadi.' });
+    return res.status(409).json({ error: 'Kaynak video bulunamadı.' });
   }
 
   const start = Number(req.body && req.body.start);
@@ -467,16 +440,16 @@ app.post('/api/jobs/:id/render', (req, res) => {
   const duration = (job.info && job.info.duration) || 0;
 
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    return res.status(400).json({ error: 'Gecerli bir zaman araligi sec.' });
+    return res.status(400).json({ error: 'Geçerli bir zaman aralığı seç.' });
   }
   if (start < 0 || (duration && end > duration + 0.5)) {
-    return res.status(400).json({ error: 'Secim videonun disina taşıyor.' });
+    return res.status(400).json({ error: 'Seçim videonun dışına taşıyor.' });
   }
   if (end - start > MAX_CLIP_SECONDS) {
     return res.status(400).json({ error: `Klip en fazla ${MAX_CLIP_SECONDS} saniye olabilir.` });
   }
   if (end - start < 1) {
-    return res.status(400).json({ error: 'Klip en az 1 saniye olmali.' });
+    return res.status(400).json({ error: 'Klip en az 1 saniye olmalı.' });
   }
 
   res.status(202).json({ ok: true });
@@ -491,7 +464,7 @@ app.post('/api/jobs/:id/render', (req, res) => {
 app.get('/api/jobs/:id/video', (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job || !job.sourceFile || !fs.existsSync(job.sourceFile)) {
-    return res.status(404).json({ error: 'Video bulunamadi.' });
+    return res.status(404).json({ error: 'Video bulunamadı.' });
   }
   res.sendFile(job.sourceFile);
 });
@@ -499,7 +472,7 @@ app.get('/api/jobs/:id/video', (req, res) => {
 app.get('/api/jobs/:id/clip', (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job || !job.clipFile || !fs.existsSync(job.clipFile)) {
-    return res.status(404).json({ error: 'Klip bulunamadi.' });
+    return res.status(404).json({ error: 'Klip bulunamadı.' });
   }
   if (req.query.download) {
     return res.download(job.clipFile, `shorts-${job.id}.mp4`);
@@ -507,11 +480,7 @@ app.get('/api/jobs/:id/clip', (req, res) => {
   res.sendFile(job.clipFile);
 });
 
-app.use('/api', (req, res) => res.status(404).json({ error: 'Bulunamadi.' }));
-
-/* ------------------------------------------------------------------ */
-/* Cleanup                                                             */
-/* ------------------------------------------------------------------ */
+app.use('/api', (req, res) => res.status(404).json({ error: 'Bulunamadı.' }));
 
 function cleanupOldJobs() {
   const cutoff = Date.now() - JOB_TTL_MS;
@@ -528,7 +497,7 @@ setInterval(cleanupOldJobs, 60 * 60 * 1000).unref();
 
 const server = app.listen(PORT, () => {
   console.log('');
-  console.log('  ShortsStudio calisiyor');
+  console.log('  ShortsStudio çalışıyor');
   console.log(`  http://localhost:${PORT}`);
   console.log(`  ffmpeg: ${FFMPEG}`);
   console.log('');
