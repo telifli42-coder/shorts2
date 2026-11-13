@@ -19,6 +19,7 @@ const MAX_CLIP_SECONDS = 180;
 const JOB_TTL_MS = Number(process.env.JOB_TTL_HOURS || 24) * 60 * 60 * 1000;
 const X264_PRESET = process.env.X264_PRESET || 'veryfast';
 const FFMPEG = process.env.FFMPEG || 'ffmpeg';
+const PYTHON = process.env.PYTHON || 'python3';
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const SESSION_COOKIE = 'st_session';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
